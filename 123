@@ -1,0 +1,285 @@
+// Banks Demo Derby //
+
+#include <a_samp>
+#include <zcmd>
+#include <sscanf2>
+#include <crashdetect>
+#include <a_mysql>
+
+#define MAX_MAPS 10
+#define DIALOG_MAP_VOTE 1
+#define DIALOG_REGISTER 1001
+#define DIALOG_LOGIN 1002
+
+// Colors
+#define COLOR_WHITE 0xFFFFFFAA
+#define ADMINORANGE 0xF6970CAA
+#define COLOR_YELLOW 0xFFFF00AA
+
+// MySQL configuration
+#define MYSQL_HOST "localhost"
+#define MYSQL_USER "root"
+#define MYSQL_PASSWORD ""
+#define MYSQL_DATABASE "banksderby"
+
+new PlayerPoints[MAX_PLAYERS]; // Points system
+new isGameActive;
+new mapChoices[3]; // Array to store random map options
+new MYSQL:MySQLConnection; // MySQL connection variable for R6
+
+// Forward declarations
+forward main();
+forward CheckStartGame();
+forward StartGame();
+forward GetActivePlayerCount();
+forward SetPlayerToSpectator(playerid);
+forward SendRandomKillMessage(killerid, victimid);
+forward ShowMapVoteDialog(playerid);
+forward ShowRegisterDialog(playerid);
+forward ShowLoginDialog(playerid);
+forward HashPassword(const password[], hashedPassword[], len);
+forward UserExists(const username[]);
+forward RegisterUser(const username[], const hashedPassword[]);
+forward CheckUserCredentials(const username[], const password[]);
+forward OnUserExistsResponse();
+forward OnCheckCredentialsResponse();
+
+// Player states
+new isPlayerRegistered[MAX_PLAYERS];
+
+// Main entry point
+public main() {
+    print("Banks Demolition Derby has started.");
+}
+
+public OnGameModeInit() {
+    print("Attempting MySQL connection...");
+
+    // Connect to MySQL database using MySQL R6 plugin
+    MySQLConnection = mysql_connect(MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE);
+
+    if (MySQLConnection != false) {  // Check if the connection handle is valid (R6 uses 'false' for failed connections)
+        print("MySQL connection is successful.");
+    } else {
+        new errorMsg[128];
+        format(errorMsg, sizeof(errorMsg), "MySQL connection failed. Error: %d", mysql_errno(MySQLConnection));
+        print(errorMsg);
+        SendRconCommand("exit");  // Close the server if connection fails
+        return 1;
+    }
+
+    return 1;  // Proceed with other initialization tasks
+}
+
+// Starting of all commands
+CMD:serverowner(playerid, params[]) {
+    SendClientMessage(playerid, ADMINORANGE, "Thanks for playing on Banks Demolition Derby!");
+    SendClientMessage(playerid, COLOR_YELLOW, "This is a passion project");
+    return 1; // Indicate that the command was handled successfully
+}
+
+// Start Game Logic
+public CheckStartGame() {
+    if (GetActivePlayerCount() >= 2 && !isGameActive) {
+        StartGame();
+    }
+}
+
+public StartGame() {
+    isGameActive = 1;
+    SendClientMessageToAll(COLOR_WHITE, "The demolition derby has begun!");
+    // Logic for starting the round
+}
+
+public GetActivePlayerCount() {
+    new count = 0;
+    for (new i = 0; i < MAX_PLAYERS; i++) {
+        if (IsPlayerConnected(i)) count++;
+    }
+    return count;
+}
+
+public OnPlayerConnect(playerid) {
+    SendClientMessage(playerid, ADMINORANGE, "Welcome to Banks Demolition Derby!");
+
+    // Check if the player is registered (this logic assumes you're tracking registration state)
+    if (!isPlayerRegistered[playerid]) {
+        ShowRegisterDialog(playerid); // Show the register dialog if the player is not registered
+    } else {
+        ShowLoginDialog(playerid); // If the player is registered, show the login dialog
+    }
+}
+
+public ShowRegisterDialog(playerid) {
+    new title[32] = "Register";
+    new message[64] = "Enter your username and password:";
+    new button1[16] = "Register";
+    new button2[16] = "Cancel";
+
+    ShowPlayerDialog(playerid, DIALOG_REGISTER, DIALOG_STYLE_INPUT, title, message, button1, button2);
+}
+
+public ShowLoginDialog(playerid) {
+    new title[32] = "Login";
+    new message[64] = "Enter your username and password:";
+    new button1[16] = "Login";
+    new button2[16] = "Cancel";
+
+    ShowPlayerDialog(playerid, DIALOG_LOGIN, DIALOG_STYLE_INPUT, title, message, button1, button2);
+}
+
+public SetPlayerToSpectator(playerid) {
+    TogglePlayerSpectating(playerid, true);
+    SendClientMessage(playerid, COLOR_WHITE, "You are now spectating.");
+    // Additional spectator setup
+}
+
+// Scoring Mechanism
+public OnPlayerDeath(playerid, killerid, reason) {
+    if (killerid != INVALID_PLAYER_ID && killerid != playerid) {
+        PlayerPoints[killerid] += 1;
+        SendRandomKillMessage(killerid, playerid); // Custom function to display messages
+    }
+}
+
+public SendRandomKillMessage(killerid, victimid) {
+    new randMsg = random(3);
+    new player1[MAX_PLAYER_NAME], player2[MAX_PLAYER_NAME];
+    GetPlayerName(killerid, player1, sizeof(player1));
+    GetPlayerName(victimid, player2, sizeof(player2));
+
+    // Fixed switch-case block with correct braces for multiple statements
+    new msg[128];
+    switch (randMsg) {
+        case 0: {
+            format(msg, sizeof(msg), "%s has owned %s!", player1, player2);
+            SendClientMessageToAll(COLOR_WHITE, msg);
+        }
+        case 1: {
+            format(msg, sizeof(msg), "%s shocked and owned %s!", player1, player2);
+            SendClientMessageToAll(COLOR_WHITE, msg);
+        }
+        case 2: {
+            format(msg, sizeof(msg), "%s crushed %s!", player1, player2);
+            SendClientMessageToAll(COLOR_WHITE, msg);
+        }
+    }
+}
+
+// Map Voting System
+public ShowMapVoteDialog(playerid) {
+    // Generate random maps
+    mapChoices[0] = random(MAX_MAPS);
+    mapChoices[1] = random(MAX_MAPS);
+    mapChoices[2] = random(MAX_MAPS);
+    ShowPlayerDialog(playerid, DIALOG_MAP_VOTE, DIALOG_STYLE_LIST, "Vote for the next map", "Map 1\\nMap 2\\nMap 3", "Vote", "Cancel");
+}
+
+public OnPlayerRequestClass(playerid, classid) {
+    SendClientMessage(playerid, ADMINORANGE, "Welcome to Banks Demolition Derby!");
+
+    // Call the registration or login dialog here
+    if (!isPlayerRegistered[playerid]) {
+        ShowRegisterDialog(playerid); // Show the register dialog if the player is not registered
+    } else {
+        ShowLoginDialog(playerid); // If the player is registered, show the login dialog
+    }
+    return 0; // Block spawn
+}
+
+public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[]) {
+    if (dialogid == DIALOG_REGISTER) {
+        if (response) {
+            new username[24], password[64];
+            if (sscanf(inputtext, "s[24]s[64]", username, password) != 2) {
+                SendClientMessage(playerid, -1, "Invalid input. Please enter both username and password.");
+                return;
+            }
+
+            // Check for existing user in the database
+            if (UserExists(username)) {
+                SendClientMessage(playerid, -1, "Username already exists!");
+                ShowRegisterDialog(playerid);
+                return;
+            }
+
+            // Hash the password using SHA256
+            new hashedPassword[64];
+            HashPassword(password, hashedPassword, 64);
+
+            // Insert new user into database
+            if (RegisterUser(username, hashedPassword)) {
+                SendClientMessage(playerid, -1, "Registration successful!");
+                isPlayerRegistered[playerid] = 1;
+            } else {
+                SendClientMessage(playerid, -1, "Registration failed!");
+            }
+        } else {
+            Kick(playerid); // Kick player if they cancel the registration
+        }
+    } else if (dialogid == DIALOG_LOGIN) {
+        if (response) {
+            new username[24], password[64];
+            if (sscanf(inputtext, "s[24]s[64]", username, password) != 2) {
+                SendClientMessage(playerid, -1, "Invalid input. Please enter both username and password.");
+                return;
+            }
+
+            // Check user credentials
+            if (CheckUserCredentials(username, password)) {
+                SendClientMessage(playerid, -1, "Login successful!");
+                isPlayerRegistered[playerid] = 1;
+            } else {
+                SendClientMessage(playerid, -1, "Invalid username or password!");
+                ShowLoginDialog(playerid);
+            }
+        } else {
+            Kick(playerid);
+        }
+    } else if (dialogid == DIALOG_MAP_VOTE) {
+        if (response) {
+            SendClientMessage(playerid, COLOR_WHITE, "You voted for the next map.");
+        }
+    }
+}
+
+// Function to check if a user exists in the database
+stock UserExists(const username[]) {
+    new query[128];
+    format(query, sizeof(query), "SELECT COUNT(*) FROM users WHERE username='%s'", username);
+    print(query);
+    mysql_query(MySQLConnection, query, -1, -1);  // Synchronous query as per R6
+    return 1;
+}
+
+// Function to register a new user
+stock RegisterUser(const username[], const hashedPassword[]) {
+    new query[256];
+    format(query, sizeof(query), "INSERT INTO users (username, password) VALUES ('%s', '%s')", username, hashedPassword);
+    mysql_query(MySQLConnection, query, -1, -1);  // Synchronous query as per R6
+    return 1;
+}
+
+// Function to check user credentials
+stock CheckUserCredentials(const username[], const password[]) {
+    new hashedPassword[64];
+    HashPassword(password, hashedPassword, 64);
+
+    new query[256];
+    format(query, sizeof(query), "SELECT COUNT(*) FROM users WHERE username='%s' AND password='%s'", username, hashedPassword);
+    mysql_query(MySQLConnection, query, -1, -1);  // Synchronous query as per R6
+    return 1;
+}
+
+// Example of a hashing function
+stock HashPassword(const password[], hashedPassword[], len) {
+    strmid(hashedPassword, password, 0, len, len); // Placeholder hashing
+}
+
+// Closing MySQL connection on exit
+public OnGameModeExit() {
+    if (MySQLConnection != false) {
+        mysql_close(MySQLConnection);
+        print("MySQL connection closed.");
+    }
+}
